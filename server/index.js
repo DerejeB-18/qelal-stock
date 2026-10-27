@@ -61,6 +61,27 @@ app.post('/api/products', async (req, res) => {
   }
 });
 
+// Soft delete / deactivate a product
+app.patch('/api/products/:id/deactivate', async (req, res) => {
+  try {
+    const Product = require('./models/Product');
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      { isActive: false },
+      { new: true }
+    );
+
+    if (!product) {
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    res.json({ message: 'Product deactivated successfully', product });
+  } catch (err) {
+    console.error('Error deactivating product:', err);
+    res.status(500).json({ error: 'Failed to deactivate product' });
+  }
+});
+
 // Record a transaction (Sale or Restock) and update product quantity
 app.post('/api/transactions', async (req, res) => {
   try {
@@ -122,6 +143,57 @@ app.post('/api/transactions', async (req, res) => {
   } catch (err) {
     console.error('Error recording transaction:', err);
     res.status(500).json({ error: 'Failed to record transaction' });
+  }
+});
+
+// Get all transaction logs (sorted by newest first)
+app.get('/api/transactions', async (req, res) => {
+  try {
+    const Transaction = require('./models/Transaction');
+    const transactions = await Transaction.find()
+      .populate('product', 'name priceMinor unit')
+      .sort({ createdAt: -1 })
+      .limit(50); // limit to last 50 transactions for speed
+      
+    res.json(transactions);
+  } catch (err) {
+    console.error('Error fetching transactions:', err);
+    res.status(500).json({ error: 'Failed to fetch transaction logs' });
+  }
+});
+
+// Get dashboard summary (valuation, low stock alerts, counts)
+app.get('/api/dashboard/summary', async (req, res) => {
+  try {
+    const Product = require('./models/Product');
+    const Transaction = require('./models/Transaction');
+
+    const products = await Product.find({ isActive: true });
+
+    let totalValuationMinor = 0;
+    let lowStockItems = [];
+
+    products.forEach(p => {
+      totalValuationMinor += p.priceMinor * p.quantity;
+      if (p.quantity <= p.reorderLevel) {
+        lowStockItems.push(p);
+      }
+    });
+
+    const recentTransactions = await Transaction.find()
+      .sort({ createdAt: -1 })
+      .limit(5);
+
+    res.json({
+      totalProducts: products.length,
+      totalValuationMinor,
+      lowStockCount: lowStockItems.length,
+      lowStockItems,
+      recentTransactions
+    });
+  } catch (err) {
+    console.error('Error fetching dashboard summary:', err);
+    res.status(500).json({ error: 'Failed to fetch dashboard summary' });
   }
 });
 
